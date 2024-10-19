@@ -1,0 +1,12 @@
+--- # Test workstation playbook for Debian systems
+- name: Install packages
+  hosts: all
+  remote_user: gren236
+  become: true
+
+  tasks:
+    - name: Ensure htop is installed
+      apt:
+        name: htop
+        state: latest
+

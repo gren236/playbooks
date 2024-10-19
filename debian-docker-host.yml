@@ -1,0 +1,121 @@
+--- # Playbook that spins up new docker host systems based on Debian OS
+- name: Install packages
+  hosts: all
+  remote_user: root
+  become: true
+
+  vars_prompt:
+    - name: username
+      prompt: Provide a username
+      private: false
+    - name: password
+      prompt: Provide a password
+
+  vars:
+    arch_mapping: # Map ansible architecture {{ ansible_architecture }} names to Docker's architecture names
+      x86_64: amd64
+      aarch64: arm64
+
+  tasks:
+    - name: Ensure needed packages are installed
+      ansible.builtin.apt:
+        pkg:
+          - htop
+          - sudo
+          - vim
+          - nginx
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - ufw
+          - software-properties-common
+          - python3-pip
+          - virtualenv
+          - python3-setuptools
+        state: present
+
+    - name: User created
+      ansible.builtin.user:
+        name: "{{ username }}"
+        password: "{{ password | password_hash('sha512') }}"
+        groups: sudo
+        append: true
+        shell: /bin/bash
+        state: present
+
+    - name: Restart ssh service
+      ansible.builtin.service:
+        name: ssh
+        state: restarted
+
+    - name: Configure firewall
+      block:
+        - name: Allow SSH
+          community.general.ufw:
+            name: OpenSSH
+            rule: allow
+
+        - name: Allow http/https
+          community.general.ufw:
+            rule: allow
+            name: Nginx Full
+
+        - name: Allow all outgoing
+          community.general.ufw:
+            direction: outgoing
+            default: allow
+
+        - name: Deny all incoming and enable
+          community.general.ufw:
+            direction: incoming
+            default: deny
+            state: enabled
+
+    - name: Configure and install docker
+      block:
+        - name: Add Docker's official GPG key
+          ansible.builtin.apt_key:
+            url: https://download.docker.com/linux/debian/gpg
+            keyring: /etc/apt/keyrings/docker.gpg
+            state: present
+
+        - name: Add Docker repository
+          ansible.builtin.apt_repository:
+            repo: >-
+              deb [arch={{ arch_mapping[ansible_architecture] | default(ansible_architecture) }}
+              signed-by=/etc/apt/keyrings/docker.gpg]
+              https://download.docker.com/linux/debian {{ ansible_lsb.codename }} stable
+            filename: docker
+            state: present
+
+        - name: Print architecture variables
+          ansible.builtin.debug:
+            msg: "Architecture: {{ ansible_architecture }}, Codename: {{ ansible_lsb.codename }}"
+
+        - name: Update apt and install docker packages
+          ansible.builtin.apt:
+            pkg:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: present
+            update_cache: true
+
+        - name: Ensure docker group exists
+          ansible.builtin.group:
+            name: docker
+            state: present
+
+        - name: Add user to docker group
+          ansible.builtin.user:
+            name: "{{ username }}"
+            groups: docker
+            append: true
+
+    - name: Install lazydocker
+      ansible.builtin.shell:
+        cmd: "curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash"
+        creates: "/home/{{ username }}/.local/bin/lazydocker"
+      become_user: "{{ username }}"
