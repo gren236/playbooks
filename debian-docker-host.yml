@@ -32,6 +32,7 @@
           - python3-pip
           - virtualenv
           - python3-setuptools
+          - certbot
         state: present
 
     - name: User created
